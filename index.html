@@ -98,6 +98,21 @@ thead th{position:sticky;top:0;background:#fff;z-index:2}
 .ov.on{opacity:1;pointer-events:auto}
 .chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 0}
 .chip{font-size:11px;padding:3px 9px;border-radius:99px;background:var(--panel3);color:var(--ink2);font-weight:500}
+.picker{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.picker select{min-width:210px}
+.btn{font-family:'Space Grotesk';font-weight:600;font-size:12px;padding:6px 12px;border-radius:9px;border:1px solid var(--line2);background:#fff;color:var(--ink2);cursor:pointer;transition:.14s}
+.btn:hover{border-color:var(--gold);color:var(--gold)}
+.btn.on{background:var(--gold);color:#fff;border-color:var(--gold)}
+th.grp{text-align:center;border-bottom:1px solid var(--line);font-size:10px;letter-spacing:.1em}
+td.foc{background:var(--goldtint)}
+tbody tr:hover td.foc{background:#fbe2d3}
+td.worse{color:var(--coral);font-weight:600}
+td.better{color:var(--green);font-weight:600}
+.act{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line)}
+.act:last-child{border-bottom:0}
+.act .rk{font-family:'JetBrains Mono';font-size:11px;font-weight:700;color:#fff;background:var(--coral);width:20px;height:20px;border-radius:6px;display:grid;place-items:center;flex:none;margin-top:2px}
+.act .bd{flex:1}.act .ttl{font-family:'Space Grotesk';font-weight:600;font-size:13px}
+.act .ds{font-size:12px;color:var(--ink2);margin-top:2px}
 .warnbox{background:var(--ambertint);border:1px solid #E7D3A8;border-radius:11px;padding:13px 15px;font-size:12.5px;color:#5C4A16}
 .warnbox b{color:#3D3009}
 </style>
@@ -112,6 +127,7 @@ thead th{position:sticky;top:0;background:#fff;z-index:2}
     <button data-p="conc">Konsentrasi Profit</button>
     <button data-p="tgt">Pencapaian Target</button>
     <button data-p="store">Per Store</button>
+    <button data-p="drill">Drill per Store</button>
     <button data-p="basis">Basis &amp; Kualitas Data</button>
   </nav>
 </div>
@@ -130,6 +146,7 @@ thead th{position:sticky;top:0;background:#fff;z-index:2}
   <section class="page" id="p-conc"></section>
   <section class="page" id="p-tgt"></section>
   <section class="page" id="p-store"></section>
+  <section class="page" id="p-drill"></section>
   <section class="page" id="p-basis"></section>
 </div>
 <div class="tip" id="tip"></div>
@@ -150,7 +167,8 @@ const PI={}; D.periods.forEach((p,i)=>PI[p.k+'|'+p.f]=i);
 const pAct=b=>PI[b+'|'+ACTF[b]], pPlan=b=>PI[b+'|Plan'];
 const NO_DA=new Set([pAct('Ags'),pAct('Sep')]);   // periode yang belum mengalokasikan D&A
 
-const S={bulan:'Sep',som:'',reg:'',da:false,tab:'sum',sortK:'dp',sortD:-1,plMode:'sel'};
+const S={bulan:'Sep',som:'',reg:'',da:false,tab:'sum',sortK:'dp',sortD:-1,plMode:'sel',
+  drill:null,cmp:[],cmpMode:'rp'};
 
 /* ---------- format ---------- */
 const mn_=s=>s.replace('-','\u2212');
@@ -609,10 +627,180 @@ function pgBasis(){
   return h;
 }
 
+
+/* =======================================================================
+   DRILL PER STORE
+   ======================================================================= */
+function accStore(pi,i){const o={};for(const r of D.arows){if(r[0]===pi&&r[1]===i)o[r[2]]=(o[r[2]]||0)+r[3]*K;}return o;}
+function hasAcc(pi){for(const r of D.arows){if(r[0]===pi)return true;}return false;}
+function similar(i,n){
+  const pa=pAct(S.bulan),g=gs(pa,i),s=D.stores[i];
+  const pool=D.stores.filter(x=>x.i!==i);
+  const same=pool.filter(x=>x.reg===s.reg);
+  const base=same.length>=n?same:pool;
+  return base.map(x=>({i:x.i,d:Math.abs(gs(pa,x.i)-g)})).sort((a,c)=>a.d-c.d).slice(0,n).map(x=>x.i);
+}
+const ORDPL=[['Gross Sales — Store','R010'],['(-) Commission of Sales','R020'],['(-) Discount','R030'],
+  ['(-) Cofunding','R040'],['(+) Platform Price Adjustment','R050'],['(+) Packaging Revenue','R060'],
+  ['Food Cost','R080'],['Consumables','R090'],['Inventory Variance','R100'],
+  ['Variable Opex — Store','R130'],['Fixed Opex — Operational (incl D&A)','R150'],
+  ['Fixed Opex — HR','R160'],['Fixed Opex — Marketing','R170']];
+function pgDrill(){
+  const L=ids(),b=S.bulan,pa=pAct(b),pp_=pPlan(b);
+  const prevB=b==='Sep'?'Ags':b==='Ags'?'Jul':null, pv=prevB!==null?pAct(prevB):null;
+  if(S.drill===null||!L.includes(S.drill))
+    S.drill=L.slice().sort((x,y)=>(dp(pa,x)-dp(pp_,x))-(dp(pa,y)-dp(pp_,y)))[0];
+  const i=S.drill,s=D.stores[i];
+  S.cmp=S.cmp.filter(x=>x!==i&&L.includes(x));
+  const A=vec(pa,i),P=vec(pp_,i),V=pv!==null?vec(pv,i):null;
+  const gsA=Math.max(A[MI.R010],1),gsP=Math.max(P[MI.R010],1),gsV=V?Math.max(V[MI.R010],1):1;
+  const rank=L.slice().sort((x,y)=>dp(pa,y)-dp(pa,x)).indexOf(i)+1;
+  const ach=P[MI.R190]>0?A[MI.R190]/P[MI.R190]:null;
+
+  let h=`<div class="eyebrow">Drill per store</div>
+  <h1 class="h-title">${esc(s.id+' '+s.nm)}</h1>
+  <p class="h-sub">Sisir satu per satu untuk menyusun action plan. Setiap baris P&amp;L ditampilkan dalam rupiah dan persentase terhadap Gross Sales, untuk Plan, ${ACTF[b]} ${BLAB[b]}, dan bulan sebelumnya.</p>
+  <div class="panel card" style="margin-top:14px">
+    <div class="picker">
+      <label style="font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);font-weight:600;font-family:JetBrains Mono">Store</label>
+      <select id="selDrill">${L.slice().sort((x,y)=>D.stores[x].id<D.stores[y].id?-1:1).map(x=>`<option value="${x}"${x===i?' selected':''}>${esc(D.stores[x].id+' '+D.stores[x].nm)}</option>`).join('')}</select>
+      <button class="btn" id="btnPrev">‹ Sebelumnya</button><button class="btn" id="btnNext">Berikutnya ›</button>
+      <span class="chip">SOM ${esc(s.som)}</span><span class="chip">${esc(s.reg)}</span>
+      <span class="chip">Peringkat profit #${rank} dari ${L.length}</span>
+      ${ach!==null?`<span class="pill ${ach>=1?'p-g':ach>=0.8?'p-a':'p-r'}">Capai target ${pc(ach,0)}</span>`:''}
+    </div>
+  </div>
+  <div class="grid g4" style="margin-top:14px">
+    ${kpi('Gross Sales '+ACTF[b],rp(A[MI.R010]),(V?sgn((A[MI.R010]-V[MI.R010])/1e6*1e6)+' jt vs '+prevB:'—'),'blue')}
+    ${kpi('Contribution Margin',rp(A[MI.R140]),pc(A[MI.R140]/gsA,1)+' GS · plan '+pc(P[MI.R140]/gsP,1),A[MI.R140]/gsA>=P[MI.R140]/gsP?'green':'coral')}
+    ${kpi('Store Direct Profit',rp(A[MI.R190]),pc(A[MI.R190]/gsA,1)+' GS · plan '+pc(P[MI.R190]/gsP,1),A[MI.R190]>=P[MI.R190]?'green':'coral')}
+    ${kpi('Gap ke target',sgn(A[MI.R190]-P[MI.R190])+' jt',V?sgn(A[MI.R190]-V[MI.R190])+' jt vs '+prevB:'—',A[MI.R190]>=P[MI.R190]?'green':'coral')}
+  </div>`;
+
+  // ---- fokus action plan
+  const foc=[];
+  ORDPL.forEach(([pl,k])=>{
+    const inv=INV.has(k);
+    const dpp=(A[MI[k]]/gsA-P[MI[k]]/gsP)*100;
+    const eff=(A[MI[k]]/gsA-P[MI[k]]/gsP)*gsA*(inv?-1:1);
+    if((inv?dpp>0:dpp<0)&&Math.abs(eff)>1e6)foc.push({pl,k,dpp,eff});
+  });
+  foc.sort((a,c)=>a.eff-c.eff);
+  if(foc.length){
+    h+=`<div class="sec-h"><h2>Yang paling perlu ditindak</h2><span class="d">Baris dengan dampak rupiah terbesar terhadap Plan ${BLAB[b]}</span></div>
+    <div class="panel card">`;
+    foc.slice(0,5).forEach((f,k)=>{
+      const acc=hasAcc(pa)&&hasAcc(pp_)?topAkun(f.k,pa,pp_,i,gsA,gsP):'';
+      h+=`<div class="act"><div class="rk">${k+1}</div><div class="bd">
+      <div class="ttl">${esc(f.pl)} — ${pp(f.dpp)} terhadap Plan, setara ${rp(Math.abs(f.eff))} sebulan</div>
+      <div class="ds">${ACTF[b]} ${pc(A[MI[f.k]]/gsA,1)} dari Gross Sales, Plan ${pc(P[MI[f.k]]/gsP,1)}${V?`, ${prevB} ${pc(V[MI[f.k]]/gsV,1)}`:''}.${acc}</div></div></div>`;
+    });
+    h+='</div>';
+  }
+
+  // ---- P&L lengkap
+  h+=`<div class="sec-h"><h2>P&amp;L lengkap</h2><span class="d">Rupiah dan % terhadap Gross Sales</span></div>
+  <div class="panel card"><div style="overflow:auto"><table><thead>
+  <tr><th rowspan="2">Rp juta</th><th class="grp" colspan="2">Plan ${b}</th><th class="grp" colspan="2">${ACTF[b]} ${b}</th>`
+  +(V?`<th class="grp" colspan="2">${ACTF[prevB]} ${prevB}</th>`:'')
+  +`<th class="grp" colspan="2">vs Plan</th>`+(V?`<th class="grp" colspan="2">vs ${prevB}</th>`:'')+`</tr>
+  <tr><th>Rp</th><th>% GS</th><th>Rp</th><th>% GS</th>`+(V?'<th>Rp</th><th>% GS</th>':'')
+  +`<th>Rp</th><th>pp</th>`+(V?'<th>Rp</th><th>pp</th>':'')+`</tr></thead><tbody>`;
+  D.met.forEach(k=>{
+    const inv=INV.has(k),cls=SUB.has(k)?'sub':'';
+    const a=A[MI[k]],p=P[MI[k]],v=V?V[MI[k]]:null;
+    const d1=a-p,dp1=(a/gsA-p/gsP)*100;
+    const d2=V?a-v:null,dp2=V?(a/gsA-v/gsV)*100:null;
+    const g1=(inv?d1<=0:d1>=0)?'pos':'neg', gp1=(inv?dp1<=0:dp1>=0)?'pos':'neg';
+    const g2=V?((inv?d2<=0:d2>=0)?'pos':'neg'):'', gp2=V?((inv?dp2<=0:dp2>=0)?'pos':'neg'):'';
+    h+=`<tr class="${cls}"><td>${D.metLab[k]}</td>
+    <td class="num mut">${jt1(p)}</td><td class="num mut">${pc(p/gsP,1)}</td>
+    <td class="num">${jt1(a)}</td><td class="num">${pc(a/gsA,1)}</td>`
+    +(V?`<td class="num mut">${jt1(v)}</td><td class="num mut">${pc(v/gsV,1)}</td>`:'')
+    +`<td class="num ${g1}">${sgn(d1)}</td><td class="num ${gp1}">${pp(dp1)}</td>`
+    +(V?`<td class="num ${g2}">${sgn(d2)}</td><td class="num ${gp2}">${pp(dp2)}</td>`:'')+`</tr>`;
+    // rincian akun di bawah baris yang punya akun
+    const mk=ORDPL.find(x=>x[1]===k);
+    if(mk&&hasAcc(pa)){
+      const ra=accStore(pa,i),rp2=hasAcc(pp_)?accStore(pp_,i):null,rv=(pv!==null&&hasAcc(pv))?accStore(pv,i):null;
+      const list=D.accounts.filter(x=>x.pl===mk[0]&&((ra[x.i]||0)||(rp2&&rp2[x.i])||(rv&&rv[x.i])));
+      list.sort((x,y)=>(ra[y.i]||0)-(ra[x.i]||0)).forEach(x=>{
+        const av=ra[x.i]||0,pv2=rp2?(rp2[x.i]||0):null,vv=rv?(rv[x.i]||0):null;
+        const dd=pv2===null?null:av-pv2;
+        h+=`<tr><td style="padding-left:22px;color:var(--ink2)">${esc(x.n)}</td>
+        <td class="num mut">${pv2===null?'—':jt1(pv2)}</td><td class="num mut">${pv2===null?'—':pc(pv2/gsP,1)}</td>
+        <td class="num">${jt1(av)}</td><td class="num">${pc(av/gsA,1)}</td>`
+        +(V?`<td class="num mut">${vv===null?'—':jt1(vv)}</td><td class="num mut">${vv===null?'—':pc(vv/gsV,1)}</td>`:'')
+        +`<td class="num ${dd===null?'mut':((inv?dd<=0:dd>=0)?'pos':'neg')}">${dd===null?'—':sgn(dd)}</td>
+        <td class="num mut">${pv2===null?'—':pp((av/gsA-pv2/gsP)*100)}</td>`
+        +(V?`<td class="num ${vv===null?'mut':((inv?av-vv<=0:av-vv>=0)?'pos':'neg')}">${vv===null?'—':sgn(av-vv)}</td><td class="num mut">${vv===null?'—':pp((av/gsA-vv/gsV)*100)}</td>`:'')+`</tr>`;
+      });
+    }
+  });
+  h+='</tbody></table></div>';
+  if(!hasAcc(pp_))h+='<div class="note-s">Rincian akun untuk Plan hanya tersedia di September. Plan Juli dan Agustus berhenti di level baris P&amp;L.</div>';
+  h+='</div>';
+
+  // ---- pembanding
+  h+=`<div class="sec-h"><h2>Bandingkan dengan store lain</h2><span class="d">Pilih satu atau dua store, lihat dalam rupiah atau persen terhadap Gross Sales</span></div>
+  <div class="panel card"><div class="picker" style="margin-bottom:14px">
+    <label style="font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted);font-weight:600;font-family:JetBrains Mono">Pembanding</label>
+    ${[0,1].map(k=>`<select class="selCmp" data-k="${k}"><option value="">— pilih store —</option>${L.filter(x=>x!==i).sort((x,y)=>D.stores[x].id<D.stores[y].id?-1:1).map(x=>`<option value="${x}"${S.cmp[k]===x?' selected':''}>${esc(D.stores[x].id+' '+D.stores[x].nm)}</option>`).join('')}</select>`).join('')}
+    <button class="btn" id="btnAuto">Isi otomatis · store termirip</button>
+    <span style="margin-left:auto"></span>
+    <div class="seg"><button class="${S.cmpMode==='rp'?'on':''}" data-m="rp">Rupiah</button><button class="${S.cmpMode==='pct'?'on':''}" data-m="pct">% Gross Sales</button></div>
+  </div>`;
+  const C=S.cmp.filter(x=>x!==undefined&&x!==null&&x!==i);
+  if(!C.length){
+    h+='<div class="note-s">Belum ada pembanding. Pilih store di atas, atau tekan isi otomatis untuk mengambil store terdekat dari sisi Gross Sales di region yang sama.</div>';
+  }else{
+    const cols=[i].concat(C);
+    const vA=cols.map(x=>vec(pa,x)), vV=pv!==null?cols.map(x=>vec(pv,x)):null;
+    const gA=vA.map(x=>Math.max(x[MI.R010],1)), gV=vV?vV.map(x=>Math.max(x[MI.R010],1)):null;
+    const cell=(arr,g,k,c)=>S.cmpMode==='rp'?jt1(arr[c][MI[k]]):pc(arr[c][MI[k]]/g[c],1);
+    h+='<div style="overflow:auto"><table><thead><tr><th rowspan="2">'+(S.cmpMode==='rp'?'Rp juta':'% Gross Sales')+'</th>'
+      +`<th class="grp" colspan="${cols.length}">${ACTF[b]} ${BLAB[b]}</th>`
+      +(vV?`<th class="grp" colspan="${cols.length}">${ACTF[prevB]} ${BLAB[prevB]}</th>`:'')+'</tr><tr>'
+      +cols.map((x,c)=>`<th${c===0?' class="foc"':''}>${esc(D.stores[x].id)}</th>`).join('')
+      +(vV?cols.map((x,c)=>`<th${c===0?' class="foc"':''}>${esc(D.stores[x].id)}</th>`).join(''):'')+'</tr></thead><tbody>';
+    D.met.forEach(k=>{
+      const inv=INV.has(k);
+      h+=`<tr class="${SUB.has(k)?'sub':''}"><td>${D.metLab[k]}</td>`;
+      [[vA,gA],[vV,gV]].forEach(([arr,g])=>{ if(!arr)return;
+        const rel=arr.map((x,c)=>x[MI[k]]/g[c]);
+        cols.forEach((x,c)=>{
+          let cl=c===0?'foc':'';
+          if(c===0&&cols.length>1){const others=rel.slice(1);
+            const worse=inv?rel[0]>Math.max(...others):rel[0]<Math.min(...others);
+            const better=inv?rel[0]<Math.min(...others):rel[0]>Math.max(...others);
+            if(worse)cl+=' worse'; else if(better)cl+=' better';}
+          h+=`<td class="num ${cl}">${cell(arr,g,k,c)}</td>`;});
+      });
+      h+='</tr>';
+    });
+    h+='</tbody></table></div><div class="legend" style="margin-top:10px">'
+      +`<span><i style="background:var(--goldtint);border:1px solid var(--line2)"></i>Kolom store fokus</span>`
+      +`<span style="color:var(--coral)">Angka merah = fokus paling buruk di antara pembanding</span>`
+      +`<span style="color:var(--green)">Angka hijau = fokus paling baik</span></div>`;
+    const nm=x=>D.stores[x].id+' '+D.stores[x].nm;
+    h+=`<div class="note-s">Pembanding: ${C.map(nm).map(esc).join(' dan ')}. Perbandingan warna memakai rasio terhadap Gross Sales masing-masing store, bukan nilai rupiahnya, supaya beda ukuran store tidak menyesatkan.</div>`;
+  }
+  return h+'</div>';
+}
+function topAkun(k,pa,pp_,i,gsA,gsP){
+  const mk=ORDPL.find(x=>x[1]===k); if(!mk)return '';
+  const ra=accStore(pa,i),rp2=accStore(pp_,i);
+  const list=D.accounts.filter(x=>x.pl===mk[0]).map(x=>({n:x.n,d:(ra[x.i]||0)-(rp2[x.i]||0)}))
+    .filter(x=>Math.abs(x.d)>5e5);
+  if(!list.length)return '';
+  list.sort((a,c)=>INV.has(k)?c.d-a.d:a.d-c.d);
+  return ' Penyumbang terbesar: '+list.slice(0,3).map(x=>`${esc(x.n)} ${sgn(x.d)} jt`).join(', ')+'.';
+}
+
 /* =======================================================================
    render
    ======================================================================= */
-const PG={sum:pgSum,pl:pgPL,conc:pgConc,tgt:pgTgt,store:pgStore,basis:pgBasis};
+const PG={sum:pgSum,pl:pgPL,conc:pgConc,tgt:pgTgt,store:pgStore,drill:pgDrill,basis:pgBasis};
 function render(){
   const L=ids();
   document.getElementById('scopeTxt').textContent=`${L.length} store · ${BLAB[S.bulan]} ${ACTF[S.bulan]}`+(S.da?' · D&A disetarakan':'');
@@ -620,7 +808,23 @@ function render(){
   el.innerHTML=PG[S.tab]();
   document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id==='p-'+S.tab));
   el.querySelectorAll('.hv').forEach(bind);
-  el.querySelectorAll('.stk').forEach(r=>r.addEventListener('click',()=>drawer(+r.dataset.s)));
+  el.querySelectorAll('.stk').forEach(r=>r.addEventListener('click',()=>{
+    S.drill=+r.dataset.s;S.cmp=[];S.tab='drill';
+    document.querySelectorAll('#tabs button').forEach(bb=>bb.classList.toggle('on',bb.dataset.p==='drill'));
+    render();window.scrollTo({top:0,behavior:'smooth'});}));
+  const sd=el.querySelector('#selDrill');
+  if(sd){
+    sd.onchange=e=>{S.drill=+e.target.value;S.cmp=[];render();};
+    const L2=ids().slice().sort((x,y)=>D.stores[x].id<D.stores[y].id?-1:1);
+    const at=L2.indexOf(S.drill);
+    el.querySelector('#btnPrev').onclick=()=>{S.drill=L2[(at-1+L2.length)%L2.length];S.cmp=[];render();};
+    el.querySelector('#btnNext').onclick=()=>{S.drill=L2[(at+1)%L2.length];S.cmp=[];render();};
+    el.querySelectorAll('.selCmp').forEach(sel=>sel.onchange=e=>{
+      const k=+e.target.dataset.k,v=e.target.value;
+      S.cmp=S.cmp.slice();S.cmp[k]=v===''?null:+v;render();});
+    el.querySelector('#btnAuto').onclick=()=>{S.cmp=similar(S.drill,2);render();};
+    el.querySelectorAll('.seg button[data-m]').forEach(bt=>bt.onclick=()=>{S.cmpMode=bt.dataset.m;render();});
+  }
   el.querySelectorAll('.sh').forEach(th=>th.addEventListener('click',()=>{
     const k=th.dataset.k; if(S.sortK===k)S.sortD*=-1;else{S.sortK=k;S.sortD=-1;} render();}));
 }
